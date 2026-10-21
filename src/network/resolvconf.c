@@ -6,19 +6,31 @@
 #include <stdlib.h>
 #include <netinet/in.h>
 
+/* Termux: pick resolv.conf path based on MUSL_ON_TERMUX env var */
+static const char *__get_resolv_conf_path(void)
+{
+	const char *env = getenv("MUSL_ON_TERMUX");
+	if (env && env[0] == '1')
+		return "/data/data/com.termux/files/usr/etc/resolv.conf";
+	return "/etc/resolv.conf";
+}
+
 int __get_resolv_conf(struct resolvconf *conf, char *search, size_t search_sz)
 {
 	char line[256];
 	unsigned char _buf[256];
 	FILE *f, _f;
 	int nns = 0;
+	const char *resolv_path;
 
 	conf->ndots = 1;
 	conf->timeout = 5;
 	conf->attempts = 2;
 	if (search) *search = 0;
 
-	f = __fopen_rb_ca("/etc/resolv.conf", &_f, _buf, sizeof _buf);
+	resolv_path = __get_resolv_conf_path();
+
+	f = __fopen_rb_ca(resolv_path, &_f, _buf, sizeof _buf);
 	if (!f) switch (errno) {
 	case ENOENT:
 	case ENOTDIR:
@@ -31,8 +43,6 @@ int __get_resolv_conf(struct resolvconf *conf, char *search, size_t search_sz)
 	while (fgets(line, sizeof line, f)) {
 		char *p, *z;
 		if (!strchr(line, '\n') && !feof(f)) {
-			/* Ignore lines that get truncated rather than
-			 * potentially misinterpreting them. */
 			int c;
 			do c = getc(f);
 			while (c != '\n' && c != EOF);
@@ -75,7 +85,6 @@ int __get_resolv_conf(struct resolvconf *conf, char *search, size_t search_sz)
 			continue;
 		for (p=line+7; isspace(*p); p++);
 		size_t l = strlen(p);
-		/* This can never happen anyway with chosen buffer sizes. */
 		if (l >= search_sz) continue;
 		memcpy(search, p, l+1);
 	}
@@ -84,8 +93,19 @@ int __get_resolv_conf(struct resolvconf *conf, char *search, size_t search_sz)
 
 no_resolv_conf:
 	if (!nns) {
-		__lookup_ipliteral(conf->ns, "127.0.0.1", AF_UNSPEC);
-		nns = 1;
+		/* Termux: try public DNS servers in order before falling back to 127.0.0.1 */
+		const char *fallbacks[] = { "1.1.1.1", "8.8.8.8", "127.0.0.1" };
+		size_t i;
+		for (i = 0; i < sizeof(fallbacks)/sizeof(fallbacks[0]); i++) {
+			if (__lookup_ipliteral(conf->ns, fallbacks[i], AF_UNSPEC) > 0) {
+				nns = 1;
+				break;
+			}
+		}
+		if (!nns) {
+			__lookup_ipliteral(conf->ns, "127.0.0.1", AF_UNSPEC);
+			nns = 1;
+		}
 	}
 
 	conf->nns = nns;
