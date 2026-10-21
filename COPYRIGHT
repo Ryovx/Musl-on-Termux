@@ -1,4 +1,13 @@
-musl as a whole is licensed under the following standard MIT license:
+musl as a whole is licensed under the following standard MIT license.
+
+This distribution is a MODIFIED build of musl libc for Termux/Android.
+Modifications: Copyright © 2026 AbdulRahman M. Muhammad
+- Added MUSL_ON_TERMUX environment variable support in
+  src/network/resolvconf.c
+- Added DNS fallback order: 1.1.1.1 -> 8.8.8.8 -> 127.0.0.1
+- Built for aarch64-linux-musl
+
+The original musl license and copyright notices follow.
 
 ----------------------------------------------------------------------
 Copyright © 2005-2020 Rich Felker, et al.
