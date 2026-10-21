@@ -22,7 +22,7 @@
 #   MoT Installer Script
 #   ─────────────────────────────────────────────────────────────────────
 #   Developed & Maintained by / Ryovx
-#   Version:      1.3.1
+#   Version:      1.3.2
 #   License:      GNU General Public License v3.0 or later
 #   Runtime:      https://github.com/Ryovx/Musl-on-Termux
 #
@@ -62,10 +62,8 @@
 #   or:
 #       bash install.sh --uninstall
 #
-#   NOTE: `mot --uninstall` removes the `mot` binary itself, so after
-#   uninstall you must run the curl command above (or `bash install.sh`
-#   if you saved this file) to reinstall. `mot --install` cannot be
-#   used after `mot --uninstall` because mot is gone.
+#   NOTE: `mot --uninstall` removes the mot binary itself. To reinstall:
+#       curl -fsSL https://raw.githubusercontent.com/Ryovx/Musl-on-Termux/main/install.sh | bash
 #
 # ═══════════════════════════════════════════════════════════════════════════
 #
@@ -80,12 +78,8 @@
 
 set -Eeuo pipefail
 
-# Diagnostic ERR trap: fires only on uncaught failures (set -e path).
-# `die` calls `exit 1` explicitly, which does NOT trigger ERR.
-trap 'rc=$?; printf "\033[1;31mx\033[0m Failed (exit %d) at line %d: %s\n" "$rc" "$LINENO" "$BASH_COMMAND" >&2' ERR
-
 readonly SCRIPT_NAME="MoT Installer Script"
-readonly SCRIPT_VERSION="1.3.1"
+readonly SCRIPT_VERSION="1.3.2"
 readonly SCRIPT_AUTHOR="Ryovx"
 
 readonly PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
@@ -98,7 +92,7 @@ readonly MOT_TMPL="$MUSL_DIR/mot.template"
 readonly MANIFEST="$MUSL_DIR/.install-manifest"
 
 readonly MUSL_RUNTIME_VERSION="1.2.6"
-readonly MOT_VERSION="1.3.1"
+readonly MOT_VERSION="1.3.2"
 
 readonly MUSL_ZIP_URL="https://github.com/Ryovx/Musl-on-Termux/releases/download/v1.2.6-termux/musl-on-termux-aarch64.zip"
 readonly MUSL_ZIP_SHA256="e4f456187a54f6fbbcda31026354728262b5acfce11642eaca2df88722c9870b"
@@ -122,11 +116,12 @@ die()      { log_fail "$*"; exit 1; }
 
 WORK_DIR=""
 cleanup_work() {
-  [[ -n "$WORK_DIR" && -d "$WORK_DIR" ]] && rm -rf -- "$WORK_DIR" 2>/dev/null || true
+  if [[ -n "${WORK_DIR:-}" && -d "$WORK_DIR" ]]; then
+    rm -rf -- "$WORK_DIR" 2>/dev/null || true
+  fi
 }
 trap cleanup_work EXIT
 
-# ─── Safety: refuse to operate outside a Termux prefix ─────────────────────
 assert_termux_prefix() {
   case "$PREFIX" in
     */com.termux/files/usr) ;;
@@ -137,7 +132,6 @@ This safeguard prevents accidental damage on non-Termux systems."
   esac
 }
 
-# ─── Manifest helpers ──────────────────────────────────────────────────────
 get_manifest_value() {
   local key="$1" val=""
   [[ -f "$MANIFEST" ]] || return 1
@@ -170,7 +164,6 @@ needs_mot_install() {
   return 0
 }
 
-# ─── Cleanup ───────────────────────────────────────────────────────────────
 cleanup_stale() {
   log_info "Cleaning up stale artifacts..."
   rm -rf -- "$MUSL_DIR".new.* "$MUSL_DIR".old.* 2>/dev/null || true
@@ -179,7 +172,6 @@ cleanup_stale() {
   log_ok "Cleanup complete"
 }
 
-# ─── Pre-flight checks ─────────────────────────────────────────────────────
 check_environment() {
   log_info "Checking environment..."
   [[ -d "$PREFIX" ]]   || die "PREFIX does not exist: $PREFIX"
@@ -200,8 +192,6 @@ check_disk_space() {
 
 ensure_packages() {
   log_info "Ensuring required packages..."
-  # Note: `readelf` is provided by the `binutils` package.
-  # We install by *package name*, not by binary name.
   local missing=()
   command -v curl    >/dev/null 2>&1 || missing+=(curl)
   command -v unzip   >/dev/null 2>&1 || missing+=(unzip)
@@ -214,7 +204,6 @@ ensure_packages() {
   log_ok "Required packages present"
 }
 
-# ─── Musl runtime (atomic) ─────────────────────────────────────────────────
 install_musl_runtime() {
   local force="${1:-0}"
 
@@ -253,11 +242,9 @@ install_musl_runtime() {
     || { rm -rf -- "$new_dir"; die "musl loader not found in archive"; }
   chmod 0755 "$new_dir/ld-musl-aarch64.so.1"
 
-  # Some consumers expect libc.so; musl's loader doubles as libc.
   [[ ! -e "$new_dir/libc.so" ]] \
     && ln -sf -- "ld-musl-aarch64.so.1" "$new_dir/libc.so" || true
 
-  # Atomic swap.
   if [[ -d "$MUSL_DIR" ]]; then
     mv -- "$MUSL_DIR" "$old_dir" \
       || { rm -rf -- "$new_dir"; die "Failed to move old runtime aside"; }
@@ -273,7 +260,6 @@ install_musl_runtime() {
   log_ok "musl runtime installed ($MUSL_DIR)"
 }
 
-# ─── mot runner (atomic) ───────────────────────────────────────────────────
 install_mot() {
   local force="${1:-0}"
 
@@ -283,21 +269,20 @@ install_mot() {
   fi
 
   log_info "Installing mot runner $MOT_VERSION..."
-
   mkdir -p "$(dirname "$MOT_BIN")" "$MUSL_DIR"
 
   local tmpl_tmp="$MOT_TMPL.tmp.$$"
 
-  cat > "$tmpl_tmp" <<'MOT_TEMPLATE_EOF'
+  cat > "$tmpl_tmp" <<'__MOT_SCRIPT_END__'
 #!/data/data/com.termux/files/usr/bin/bash
 # ═══════════════════════════════════════════════════════════════════════════
-# mot 1.3.1 — run anything using musl on Termux
+# mot 1.3.2 — run anything using musl on Termux
 # Copyright © 2026 Ryovx. Licensed under GNU GPL v3.0 or later.
 # DO NOT EDIT. Restore with: mot --fix
 # ═══════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
-readonly MOT_VERSION="1.3.1"
+readonly MOT_VERSION="1.3.2"
 readonly PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 readonly MUSL="$PREFIX/lib/musl"
 readonly MUSL_LOADER="$MUSL/ld-musl-aarch64.so.1"
@@ -305,9 +290,11 @@ readonly MOT_BIN="$PREFIX/bin/mot"
 readonly MOT_TMPL="$MUSL/mot.template"
 readonly INSTALLER_URL="https://raw.githubusercontent.com/Ryovx/Musl-on-Termux/main/install.sh"
 
+die() { printf 'mot: %s\n' "$*" >&2; exit 1; }
+
 usage() {
-  cat <<EOF
-mot $MOT_VERSION — run anything using musl on Termux
+  cat <<'__MOT_USAGE_END__'
+mot — run anything using musl on Termux
 
 USAGE
   mot COMMAND [ARGS...]     Run COMMAND with the musl runtime
@@ -327,48 +314,21 @@ EXAMPLES
   mot bash                  Start a bash shell with musl env
 
 NOTE
-  `mot --uninstall` removes the `mot` binary itself. After uninstall,
-  reinstall with:
-
+  `mot --uninstall` removes the mot binary itself. To reinstall:
       curl -fsSL https://raw.githubusercontent.com/Ryovx/Musl-on-Termux/main/install.sh | bash
-
-  `mot --install` cannot be used after `mot --uninstall` because mot
-  is gone.
 
 EXIT STATUS
   0    Success
   1    Usage error or runtime missing
   126  Command found but not executable
   127  Command not found
-EOF
+__MOT_USAGE_END__
 }
-
-die() { printf 'mot: %s\n' "$*" >&2; exit 1; }
 
 ensure_runtime() {
   [[ -x "$MUSL_LOADER" ]] || die "musl runtime not found at $MUSL — run: mot --install"
 }
 
-# Set musl-specific environment variables.
-# IMPORTANT: do NOT touch LD_PRELOAD here. Bionic binaries (bash, ls,
-# zip, ...) need termux-exec's LD_PRELOAD to translate absolute paths
-# like /etc -> $PREFIX/etc and /bin/sh -> $PREFIX/bin/sh. LD_PRELOAD is
-# unset only at the point of exec-ing a musl binary, where its symbols
-# would collide with musl's resolver and libc.
-build_env() {
-  export MUSL_ON_TERMUX=1
-  if [[ -d "$MUSL/include" ]]; then
-    export C_INCLUDE_PATH="$MUSL/include${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
-    export CPLUS_INCLUDE_PATH="$MUSL/include${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
-  fi
-  if [[ -d "$MUSL/bin" ]]; then
-    export PATH="$MUSL/bin:$PREFIX/bin:$PATH"
-  fi
-}
-
-# Extract the PT_INTERP field from an ELF file.
-# Tries `readelf` first (from binutils), falls back to `file`.
-# Prints nothing for non-ELF files (scripts, data, builtins).
 elf_interp() {
   local f="$1" out=""
   if command -v readelf >/dev/null 2>&1; then
@@ -390,62 +350,53 @@ run_command() {
   local cmd="$1"
   shift
 
-  build_env
+  export MUSL_ON_TERMUX=1
 
+  # Shell builtins, functions, keywords, aliases: run in current shell.
+  local ctype
+  ctype="$(type -t "$cmd" 2>/dev/null || true)"
+  case "$ctype" in
+    builtin|function|keyword|alias)
+      command "$cmd" "$@"
+      return $?
+      ;;
+  esac
+
+  # External file: resolve to a path.
   local target=""
   if [[ "$cmd" == */* ]]; then
     target="$cmd"
-    [[ -f "$target" ]] || die "not a file: $target"
   else
     target="$(command -v "$cmd" 2>/dev/null || true)"
   fi
 
-  # Shell builtins, functions, keywords, aliases — no external file.
-  if [[ -z "$target" || ! -f "$target" ]]; then
-    local ctype
-    ctype="$(type -t "$cmd" 2>/dev/null || true)"
-    case "$ctype" in
-      builtin|function|keyword|alias)
-        exec bash -c '"$@"' _ "$cmd" "$@"
-        ;;
-      *)
-        die "command not found: $cmd"
-        ;;
-    esac
-  fi
-
-  [[ -x "$target" ]] \
-    || { printf 'mot: not executable: %s\n' "$target" >&2; exit 126; }
+  [[ -n "$target" ]] || { printf 'mot: command not found: %s\n' "$cmd" >&2; exit 127; }
+  [[ -f "$target" ]] || die "not a file: $target"
+  [[ -x "$target" ]] || { printf 'mot: not executable: %s\n' "$target" >&2; exit 126; }
 
   local interp
   interp="$(elf_interp "$target")"
 
   if [[ "$interp" == *ld-musl-* ]]; then
-    # musl binary: strip Bionic's LD_PRELOAD (termux-exec) because its
-    # symbols collide with musl's. Pass MUSL_ON_TERMUX=1 so the patched
-    # loader reads $PREFIX/etc/resolv.conf and uses the DNS fallback.
-    exec env -u LD_PRELOAD MUSL_ON_TERMUX=1 \
-      "$MUSL_LOADER" --library-path "$MUSL:$MUSL/lib" \
+    env -u LD_PRELOAD MUSL_ON_TERMUX=1 \
+      "$MUSL_LOADER" --library-path "$MUSL" \
       "$target" "$@"
+  else
+    "$target" "$@"
   fi
-
-  # Bionic binary: keep LD_PRELOAD so termux-exec translates paths.
-  exec "$target" "$@"
 }
 
 cmd_install() {
   [[ $# -eq 0 ]] || die "mot --install takes no arguments"
   command -v curl >/dev/null 2>&1 || die "curl not found — run: pkg install curl"
   printf 'mot: running installer from %s\n' "$INSTALLER_URL" >&2
-  local tmp
+  local tmp rc=0
   tmp="$(mktemp)"
-  if ! curl -fsSL --connect-timeout 30 --max-time 300 \
-        "$INSTALLER_URL" -o "$tmp"; then
+  if ! curl -fsSL --connect-timeout 30 --max-time 300 "$INSTALLER_URL" -o "$tmp"; then
     rm -f -- "$tmp"
     die "failed to download installer"
   fi
-  bash "$tmp"
-  local rc=$?
+  bash "$tmp" || rc=$?
   rm -f -- "$tmp"
   exit "$rc"
 }
@@ -454,15 +405,13 @@ cmd_update() {
   [[ $# -eq 0 ]] || die "mot --update takes no arguments"
   command -v curl >/dev/null 2>&1 || die "curl not found — run: pkg install curl"
   printf 'mot: running installer (--force) from %s\n' "$INSTALLER_URL" >&2
-  local tmp
+  local tmp rc=0
   tmp="$(mktemp)"
-  if ! curl -fsSL --connect-timeout 30 --max-time 300 \
-        "$INSTALLER_URL" -o "$tmp"; then
+  if ! curl -fsSL --connect-timeout 30 --max-time 300 "$INSTALLER_URL" -o "$tmp"; then
     rm -f -- "$tmp"
     die "failed to download installer"
   fi
-  bash "$tmp" --force
-  local rc=$?
+  bash "$tmp" --force || rc=$?
   rm -f -- "$tmp"
   exit "$rc"
 }
@@ -487,7 +436,7 @@ cmd_uninstall() {
   rm -f  -- "$MOT_BIN" 2>/dev/null || true
   rm -rf -- "$MUSL"    2>/dev/null || true
   printf 'mot: uninstalled\n'
-  printf 'mot: to reinstall, run:\n'
+  printf 'mot: to reinstall:\n'
   printf '  curl -fsSL %s | bash\n' "$INSTALLER_URL"
 }
 
@@ -498,8 +447,8 @@ main() {
     -h|--help)      usage; exit 0 ;;
     -v|--version)   printf 'mot %s (Musl on Termux)\n' "$MOT_VERSION"; exit 0 ;;
     -i|--install)   shift; cmd_install "$@" ;;
-    -u|--update)    shift; cmd_update  "$@" ;;
-    -f|--fix)       shift; cmd_fix     "$@" ;;
+    -u|--update)    shift; cmd_update "$@" ;;
+    -f|--fix)       shift; cmd_fix ;;
     -x|--uninstall) shift; cmd_uninstall ;;
     --)             shift; ensure_runtime; run_command "$@" ;;
     -*)             printf 'mot: unknown option: %s (try --help)\n' "$1" >&2; exit 1 ;;
@@ -508,7 +457,7 @@ main() {
 }
 
 main "$@"
-MOT_TEMPLATE_EOF
+__MOT_SCRIPT_END__
 
   chmod 0755 "$tmpl_tmp"
   mv -- "$tmpl_tmp" "$MOT_TMPL"
@@ -521,50 +470,49 @@ MOT_TEMPLATE_EOF
   log_ok "mot installed ($MOT_BIN)"
 }
 
-# ─── Verification ──────────────────────────────────────────────────────────
 verify_installation() {
   log_info "Verifying installation..."
 
   [[ -x "$MUSL_LOADER" ]] || die "musl loader not executable: $MUSL_LOADER"
   [[ -x "$MOT_BIN" ]]     || die "mot not executable: $MOT_BIN"
+  log_ok "Files present and executable"
 
-  local ver
-  ver="$("$MOT_BIN" --version 2>&1 || true)"
-  [[ "$ver" == mot* ]] || die "mot --version failed: $ver"
-  log_ok "mot --version OK ($ver)"
+  local out rc
 
-  "$MOT_BIN" --help >/dev/null 2>&1 || die "mot --help failed"
+  # 1. mot --version
+  rc=0; out="$("$MOT_BIN" --version 2>&1)" || rc=$?
+  [[ $rc -eq 0 ]] || die "mot --version failed (rc=$rc): $out"
+  [[ "$out" == mot* ]] || die "mot --version unexpected: $out"
+  log_ok "mot --version: $out"
+
+  # 2. mot --help
+  rc=0; "$MOT_BIN" --help >/dev/null 2>&1 || rc=$?
+  [[ $rc -eq 0 ]] || die "mot --help failed (rc=$rc)"
   log_ok "mot --help OK"
 
-  # Builtin path (echo) — must not go through ELF detection.
-  local out_builtin
-  out_builtin="$("$MOT_BIN" echo "MOT_BUILTIN_OK" 2>&1 || true)"
-  [[ "$out_builtin" == "MOT_BUILTIN_OK" ]] \
-    || die "mot echo failed: $out_builtin"
+  # 3. mot echo (builtin path)
+  rc=0; out="$("$MOT_BIN" echo "MOT_BUILTIN_OK" 2>&1)" || rc=$?
+  [[ $rc -eq 0 ]] || die "mot echo failed (rc=$rc): $out"
+  [[ "$out" == "MOT_BUILTIN_OK" ]] || die "mot echo wrong output: $out"
   log_ok "mot builtin path OK"
 
-  # ELF path (uname) — must go through Bionic exec.
-  local out_file
-  out_file="$("$MOT_BIN" uname -s 2>&1 || true)"
-  [[ "$out_file" == "Linux" ]] \
-    || die "mot uname failed: $out_file"
-  log_ok "mot ELF path OK"
+  # 4. mot uname (external ELF path)
+  rc=0; out="$("$MOT_BIN" uname -s 2>&1)" || rc=$?
+  [[ $rc -eq 0 ]] || die "mot uname failed (rc=$rc): $out"
+  [[ "$out" == "Linux" ]] || die "mot uname wrong output: $out"
+  log_ok "mot external ELF path OK"
 
-  # End-to-end via Claude Code when present (best-effort, non-fatal).
-  local claude_bin
-  claude_bin="$(command -v claude 2>/dev/null || true)"
-  if [[ -n "$claude_bin" ]]; then
-    local out_claude
-    out_claude="$("$MOT_BIN" claude --version 2>&1 || true)"
-    if [[ "$out_claude" == *"Claude Code"* ]]; then
-      log_ok "mot claude OK ($out_claude)"
+  # 5. mot claude (optional)
+  if command -v claude >/dev/null 2>&1; then
+    rc=0; out="$("$MOT_BIN" claude --version 2>&1)" || rc=$?
+    if [[ $rc -eq 0 && "$out" == *"Claude Code"* ]]; then
+      log_ok "mot claude OK ($out)"
     else
-      log_warn "mot claude returned unexpected: $out_claude"
+      log_warn "mot claude returned (rc=$rc): $out"
     fi
   fi
 }
 
-# ─── Summary ───────────────────────────────────────────────────────────────
 print_summary() {
   cat <<SUMMARY
 
@@ -597,9 +545,6 @@ ${C_MAG}${C_BLD}╚════════════════════�
     Loader     ${C_CYN}${MUSL_LOADER}${C_RST}
     Manifest   ${C_CYN}${MANIFEST}${C_RST}
 
-  ${C_BLD}DNS${C_RST}
-    mot uses $PREFIX/etc/resolv.conf (managed by Termux).
-
   ${C_BLD}Reinstall after uninstall${C_RST}
     curl -fsSL ${INSTALLER_URL} | bash
 
@@ -613,7 +558,6 @@ ${C_YEL}${C_BLD}─────────────────────�
 SUMMARY
 }
 
-# ─── Uninstall ─────────────────────────────────────────────────────────────
 do_uninstall() {
   assert_termux_prefix
   log_info "Uninstalling MoT..."
@@ -622,7 +566,6 @@ do_uninstall() {
   log_ok "Uninstall complete"
 }
 
-# ─── Usage ─────────────────────────────────────────────────────────────────
 print_usage() {
   cat <<'USAGE_EOF'
 $SCRIPT_NAME v$SCRIPT_VERSION
@@ -650,7 +593,6 @@ NOTE
 USAGE_EOF
 }
 
-# ─── Entry point ───────────────────────────────────────────────────────────
 main() {
   local FORCE=0
   while [[ $# -gt 0 ]]; do
@@ -658,7 +600,7 @@ main() {
       -h|--help)     print_usage; exit 0 ;;
       -v|--version)  printf '%s v%s\n' "$SCRIPT_NAME" "$SCRIPT_VERSION"; exit 0 ;;
       --uninstall)   do_uninstall; exit 0 ;;
-      -i|--install)  shift ;;   # no-op — install is the default behavior
+      -i|--install)  shift ;;
       -f|--force|-u|--update) FORCE=1; shift ;;
       *)             die "Unknown argument: $1 (try --help)" ;;
     esac
