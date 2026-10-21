@@ -24,20 +24,20 @@ jobs:
           test -f toolchain.tar.xz || { echo "::error::download failed"; exit 1; }
           tar -xJf toolchain.tar.xz
 
-      - name: Inspect toolchain bin directory
+      - name: Locate real gcc
         run: |
-          TOOLCHAIN_DIR="$PWD/musl-gcc-cross/aarch64-unknown-linux-musl"
-          echo "=== Contents of $TOOLCHAIN_DIR/bin ==="
-          ls -la "$TOOLCHAIN_DIR/bin" || true
-          echo "=== All gcc-like binaries ==="
-          find "$PWD/musl-gcc-cross" -type f -name "*gcc*" 2>/dev/null | head -20
+          echo "=== Top-level bin ==="
+          ls -la "$PWD/musl-gcc-cross/bin/" | head -40
+          echo "=== Find gcc ==="
+          find "$PWD/musl-gcc-cross" -name "*gcc*" -type f 2>/dev/null | head -10
 
       - name: Configure musl
         run: |
-          GCC="$PWD/musl-gcc-cross/aarch64-unknown-linux-musl/bin/aarch64-unknown-linux-musl-gcc"
+          GCC="$PWD/musl-gcc-cross/bin/aarch64-unknown-linux-musl-gcc"
           if [ ! -x "$GCC" ]; then
             echo "::error::gcc not found at $GCC"
-            ls -la "$(dirname "$GCC")" || true
+            echo "Trying to find gcc..."
+            find "$PWD/musl-gcc-cross" -name "*gcc*" -type f 2>/dev/null
             exit 1
           fi
           echo "Using GCC: $GCC"
@@ -49,7 +49,7 @@ jobs:
 
       - name: Build musl
         run: |
-          GCC="$PWD/musl-gcc-cross/aarch64-unknown-linux-musl/bin/aarch64-unknown-linux-musl-gcc"
+          GCC="$PWD/musl-gcc-cross/bin/aarch64-unknown-linux-musl-gcc"
           make -j$(nproc) CC="$GCC"
 
       - name: Install to dist
