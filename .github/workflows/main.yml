@@ -23,33 +23,34 @@ jobs:
           done
           test -f toolchain.tar.xz || { echo "::error::download failed"; exit 1; }
           tar -xJf toolchain.tar.xz
-          ls -la musl-gcc-cross/aarch64-unknown-linux-musl/bin/ | head
 
-      - name: Add toolchain to PATH
+      - name: Inspect toolchain bin directory
         run: |
           TOOLCHAIN_DIR="$PWD/musl-gcc-cross/aarch64-unknown-linux-musl"
-          if [ ! -d "$TOOLCHAIN_DIR/bin" ]; then
-            echo "::error::toolchain bin dir not found at $TOOLCHAIN_DIR/bin"
-            find $PWD -maxdepth 4 -type d -name bin
-            exit 1
-          fi
-          echo "$TOOLCHAIN_DIR/bin" >> $GITHUB_PATH
-          echo "Toolchain dir: $TOOLCHAIN_DIR"
-
-      - name: Verify toolchain
-        run: |
-          which aarch64-unknown-linux-musl-gcc || true
-          aarch64-unknown-linux-musl-gcc --version
+          echo "=== Contents of $TOOLCHAIN_DIR/bin ==="
+          ls -la "$TOOLCHAIN_DIR/bin" || true
+          echo "=== All gcc-like binaries ==="
+          find "$PWD/musl-gcc-cross" -type f -name "*gcc*" 2>/dev/null | head -20
 
       - name: Configure musl
         run: |
-          CC=aarch64-unknown-linux-musl-gcc ./configure \
+          GCC="$PWD/musl-gcc-cross/aarch64-unknown-linux-musl/bin/aarch64-unknown-linux-musl-gcc"
+          if [ ! -x "$GCC" ]; then
+            echo "::error::gcc not found at $GCC"
+            ls -la "$(dirname "$GCC")" || true
+            exit 1
+          fi
+          echo "Using GCC: $GCC"
+          "$GCC" --version
+          CC="$GCC" ./configure \
             --target=aarch64-linux-musl \
             --prefix=$PWD/dist \
             --syslibdir=$PWD/dist
 
       - name: Build musl
-        run: make -j$(nproc) CC=aarch64-unknown-linux-musl-gcc
+        run: |
+          GCC="$PWD/musl-gcc-cross/aarch64-unknown-linux-musl/bin/aarch64-unknown-linux-musl-gcc"
+          make -j$(nproc) CC="$GCC"
 
       - name: Install to dist
         run: make install
