@@ -22,50 +22,34 @@ jobs:
             sleep 10
           done
           test -f toolchain.tar.xz || { echo "::error::download failed"; exit 1; }
-          # .tar.xz يحتاج -xJf
           tar -xJf toolchain.tar.xz
-          ls -la
-          find . -maxdepth 3 -type d -name bin | head -5
+          ls -la musl-gcc-cross/aarch64-unknown-linux-musl/bin/ | head
 
       - name: Add toolchain to PATH
         run: |
-          TOOLCHAIN_DIR=$(find $PWD -maxdepth 2 -type d -name "*aarch64*" | head -1)
-          echo "Toolchain dir: $TOOLCHAIN_DIR"
-          if [ -z "$TOOLCHAIN_DIR" ]; then
-            echo "::error::toolchain dir not found"
-            ls -la
+          TOOLCHAIN_DIR="$PWD/musl-gcc-cross/aarch64-unknown-linux-musl"
+          if [ ! -d "$TOOLCHAIN_DIR/bin" ]; then
+            echo "::error::toolchain bin dir not found at $TOOLCHAIN_DIR/bin"
+            find $PWD -maxdepth 4 -type d -name bin
             exit 1
           fi
           echo "$TOOLCHAIN_DIR/bin" >> $GITHUB_PATH
+          echo "Toolchain dir: $TOOLCHAIN_DIR"
 
       - name: Verify toolchain
         run: |
-          ls -la $(dirname $(which aarch64-unknown-linux-musl-gcc 2>/dev/null || which aarch64-linux-musl-gcc 2>/dev/null)) 2>/dev/null || true
-          # جرّب كلا الاسمين
-          aarch64-unknown-linux-musl-gcc --version || aarch64-linux-musl-gcc --version
+          which aarch64-unknown-linux-musl-gcc || true
+          aarch64-unknown-linux-musl-gcc --version
 
       - name: Configure musl
         run: |
-          # جرّب كلا الاسمين
-          if command -v aarch64-unknown-linux-musl-gcc >/dev/null 2>&1; then
-            export CC=aarch64-unknown-linux-musl-gcc
-          else
-            export CC=aarch64-linux-musl-gcc
-          fi
-          echo "Using CC=$CC"
-          ./configure \
+          CC=aarch64-unknown-linux-musl-gcc ./configure \
             --target=aarch64-linux-musl \
             --prefix=$PWD/dist \
             --syslibdir=$PWD/dist
 
       - name: Build musl
-        run: |
-          if command -v aarch64-unknown-linux-musl-gcc >/dev/null 2>&1; then
-            export CC=aarch64-unknown-linux-musl-gcc
-          else
-            export CC=aarch64-linux-musl-gcc
-          fi
-          make -j$(nproc) CC="$CC"
+        run: make -j$(nproc) CC=aarch64-unknown-linux-musl-gcc
 
       - name: Install to dist
         run: make install
