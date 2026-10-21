@@ -7,28 +7,19 @@ on:
 
 jobs:
   build:
-    # runner aarch64 حقيقي من GitHub
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify runner architecture
+      - name: Verify environment
         run: |
-          uname -m          # لازم يطلع aarch64
-          gcc --version
-          gcc -dumpmachine  # aarch64-linux-gnu
+          uname -m
+          gcc -dumpmachine
+          which gcc make ld ar
 
-      - name: Install build deps
+      - name: Configure musl (native)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential
-
-      - name: Configure musl
-        run: |
-          ./configure \
-            --target=aarch64-linux-musl \
-            --prefix=$PWD/dist \
-            --syslibdir=$PWD/dist
+          ./configure --prefix=$PWD/dist --syslibdir=$PWD/dist
 
       - name: Build musl
         run: make -j$(nproc)
@@ -38,7 +29,8 @@ jobs:
 
       - name: Verify and prepare artifact
         run: |
-          test -f dist/lib/libc.so || { echo "::error::libc.so not found"; ls -la dist/; exit 1; }
+          ls -la dist/lib/
+          test -f dist/lib/libc.so || { echo "::error::libc.so not found"; exit 1; }
           file dist/lib/libc.so
           cp dist/lib/libc.so dist/ld-musl-aarch64.so.1
 
