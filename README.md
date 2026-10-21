@@ -118,20 +118,6 @@ The archive contains only:
 
 ---
 
-## Repository layout
-
-    .
-    ├── install.sh                 installer (GPLv3)
-    ├── src/                       patched musl source tree
-    │   └── network/resolvconf.c   patched DNS resolver
-    ├── CHANGELOG.md               changes for this patch set (not musl's WHATSNEW)
-    ├── WHATSNEW                   musl's own changelog (unmodified)
-    ├── COPYRIGHT                  musl's original MIT license + attributions
-    ├── LICENSE                    dual license (MIT for musl parts, GPLv3 for scripts)
-    └── README.md
-
----
-
 ## License
 
 This repository ships **two licenses**, one per part:
