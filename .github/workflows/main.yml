@@ -1,0 +1,70 @@
+name: Build patched musl for Termux (prebuilt toolchain)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'src/network/resolvconf.c'
+      - '.github/workflows/build-musl-termux.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout musl mirror
+        uses: actions/checkout@v4
+
+      - name: Download prebuilt musl-cross toolchain (aarch64)
+        run: |
+          # سلسلة أدوات جاهزة تعمل على x86_64 Linux وتنتج كود aarch64
+          URL="https://musl.cc/aarch64-linux-musl-cross.tgz"
+          curl -fsSL "$URL" -o toolchain.tgz
+          tar -xzf toolchain.tgz
+          ls -la aarch64-linux-musl-cross/bin/
+          echo "$PWD/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
+
+      - name: Verify toolchain
+        run: |
+          aarch64-linux-musl-gcc --version
+          aarch64-linux-musl-gcc -dumpmachine
+
+      - name: Configure musl (cross for aarch64)
+        run: |
+          CC=aarch64-linux-musl-gcc ./configure \
+            --target=aarch64-linux-musl \
+            --prefix=/data/data/com.termux/files/usr/lib/claude-musl \
+            --syslibdir=/data/data/com.termux/files/usr/lib/claude-musl
+          # ملاحظة: --disable-shared قد لا يكون مناسبًا إذا أردت libc.so كـ shared
+          # إذا كنت تحتاج libc.so كـ shared، احذف --disable-shared
+
+      - name: Build musl
+        run: make -j$(nproc)
+
+      - name: Verify produced libc
+        run: |
+          file lib/libc.a 2>/dev/null || true
+          file lib/libc.so 2>/dev/null || true
+          # نتوقع ملف libc.so أو libc.a بحسب --disable-shared
+
+      - name: Package artifacts
+        run: |
+          mkdir -p dist
+          # إذا كان libc.so موجودًا (shared)
+          if [ -f lib/libc.so ]; then
+            cp lib/libc.so dist/ld-musl-aarch64.so.1
+          fi
+          # إذا كان libc.a (static)
+          if [ -f lib/libc.a ]; then
+            cp lib/libc.a dist/libc.a
+          fi
+          cp -a include dist/include 2>/dev/null || true
+          cp -a lib/*.a dist/ 2>/dev/null || true
+          ls -la dist/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: musl-termux-aarch64
+          path: dist/
+          retention-days: 30
