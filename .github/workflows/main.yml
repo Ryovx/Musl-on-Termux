@@ -27,18 +27,27 @@ jobs:
       - name: Install
         run: make install
 
-      - name: Verify and prepare artifact
+      - name: Verify artifacts
         run: |
+          ls -la dist/
           ls -la dist/lib/
           test -f dist/lib/libc.so || { echo "::error::libc.so not found"; exit 1; }
           file dist/lib/libc.so
-          cp dist/lib/libc.so dist/ld-musl-aarch64.so.1
+          # musl installs ld-musl-aarch64.so.1 as symlink to lib/libc.so
+          ls -la dist/ld-musl-aarch64.so.1 || echo "(no symlink, will copy manually)"
+
+      - name: Prepare artifact dir
+        run: |
+          mkdir -p artifact
+          # نسخ libc.so الفعلي (مش symlink) تحت اسم loader
+          cp -f dist/lib/libc.so artifact/ld-musl-aarch64.so.1
+          # نسخ باقي الملفات
+          cp -a dist/lib artifact/lib
+          cp -a dist/include artifact/include
+          ls -la artifact/
 
       - uses: actions/upload-artifact@v4
         with:
           name: musl-termux-aarch64
-          path: |
-            dist/ld-musl-aarch64.so.1
-            dist/lib/
-            dist/include/
+          path: artifact/
           retention-days: 30
