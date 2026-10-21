@@ -4,67 +4,83 @@ on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
-    paths:
-      - 'src/network/resolvconf.c'
-      - '.github/workflows/build-musl-termux.yml'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout musl mirror
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Download prebuilt musl-cross toolchain (aarch64)
+      - name: Download prebuilt musl-cross toolchain (aarch64, GCC 16)
         run: |
-          # سلسلة أدوات جاهزة تعمل على x86_64 Linux وتنتج كود aarch64
-          URL="https://musl.cc/aarch64-linux-musl-cross.tgz"
-          curl -fsSL "$URL" -o toolchain.tgz
-          tar -xzf toolchain.tgz
-          ls -la aarch64-linux-musl-cross/bin/
-          echo "$PWD/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
+          URL="https://github.com/AmanoTeam/musl-gcc-cross/releases/download/gcc-16/aarch64-unknown-linux-musl.tar.xz"
+          for i in 1 2 3; do
+            if curl -fsSL --connect-timeout 30 --max-time 600 "$URL" -o toolchain.tar.xz; then
+              break
+            fi
+            echo "Retry $i failed, waiting..."
+            sleep 10
+          done
+          test -f toolchain.tar.xz || { echo "::error::download failed"; exit 1; }
+          # .tar.xz يحتاج -xJf
+          tar -xJf toolchain.tar.xz
+          ls -la
+          find . -maxdepth 3 -type d -name bin | head -5
+
+      - name: Add toolchain to PATH
+        run: |
+          TOOLCHAIN_DIR=$(find $PWD -maxdepth 2 -type d -name "*aarch64*" | head -1)
+          echo "Toolchain dir: $TOOLCHAIN_DIR"
+          if [ -z "$TOOLCHAIN_DIR" ]; then
+            echo "::error::toolchain dir not found"
+            ls -la
+            exit 1
+          fi
+          echo "$TOOLCHAIN_DIR/bin" >> $GITHUB_PATH
 
       - name: Verify toolchain
         run: |
-          aarch64-linux-musl-gcc --version
-          aarch64-linux-musl-gcc -dumpmachine
+          ls -la $(dirname $(which aarch64-unknown-linux-musl-gcc 2>/dev/null || which aarch64-linux-musl-gcc 2>/dev/null)) 2>/dev/null || true
+          # جرّب كلا الاسمين
+          aarch64-unknown-linux-musl-gcc --version || aarch64-linux-musl-gcc --version
 
-      - name: Configure musl (cross for aarch64)
+      - name: Configure musl
         run: |
-          CC=aarch64-linux-musl-gcc ./configure \
+          # جرّب كلا الاسمين
+          if command -v aarch64-unknown-linux-musl-gcc >/dev/null 2>&1; then
+            export CC=aarch64-unknown-linux-musl-gcc
+          else
+            export CC=aarch64-linux-musl-gcc
+          fi
+          echo "Using CC=$CC"
+          ./configure \
             --target=aarch64-linux-musl \
-            --prefix=/data/data/com.termux/files/usr/lib/claude-musl \
-            --syslibdir=/data/data/com.termux/files/usr/lib/claude-musl
-          # ملاحظة: --disable-shared قد لا يكون مناسبًا إذا أردت libc.so كـ shared
-          # إذا كنت تحتاج libc.so كـ shared، احذف --disable-shared
+            --prefix=$PWD/dist \
+            --syslibdir=$PWD/dist
 
       - name: Build musl
-        run: make -j$(nproc)
-
-      - name: Verify produced libc
         run: |
-          file lib/libc.a 2>/dev/null || true
-          file lib/libc.so 2>/dev/null || true
-          # نتوقع ملف libc.so أو libc.a بحسب --disable-shared
+          if command -v aarch64-unknown-linux-musl-gcc >/dev/null 2>&1; then
+            export CC=aarch64-unknown-linux-musl-gcc
+          else
+            export CC=aarch64-linux-musl-gcc
+          fi
+          make -j$(nproc) CC="$CC"
 
-      - name: Package artifacts
+      - name: Install to dist
+        run: make install
+
+      - name: Verify and rename
         run: |
-          mkdir -p dist
-          # إذا كان libc.so موجودًا (shared)
-          if [ -f lib/libc.so ]; then
-            cp lib/libc.so dist/ld-musl-aarch64.so.1
-          fi
-          # إذا كان libc.a (static)
-          if [ -f lib/libc.a ]; then
-            cp lib/libc.a dist/libc.a
-          fi
-          cp -a include dist/include 2>/dev/null || true
-          cp -a lib/*.a dist/ 2>/dev/null || true
-          ls -la dist/
+          test -f dist/lib/libc.so || { echo "::error::libc.so missing"; ls -la dist/lib/ 2>/dev/null; exit 1; }
+          file dist/lib/libc.so
+          cp dist/lib/libc.so dist/ld-musl-aarch64.so.1
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: musl-termux-aarch64
-          path: dist/
+          path: |
+            dist/ld-musl-aarch64.so.1
+            dist/lib/
+            dist/include/
           retention-days: 30
