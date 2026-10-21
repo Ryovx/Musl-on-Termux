@@ -1,4 +1,4 @@
-name: Build patched musl for Termux (prebuilt toolchain)
+name: Build patched musl for Termux (Bootlin cross-toolchain)
 
 on:
   workflow_dispatch:
@@ -11,37 +11,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download prebuilt musl-cross toolchain (aarch64, GCC 16)
+      - name: Download Bootlin aarch64-musl cross toolchain
         run: |
-          URL="https://github.com/AmanoTeam/musl-gcc-cross/releases/download/gcc-16/aarch64-unknown-linux-musl.tar.xz"
+          URL="https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--musl--stable-2024.02-1.tar.xz"
           for i in 1 2 3; do
-            if curl -fsSL --connect-timeout 30 --max-time 600 "$URL" -o toolchain.tar.xz; then
+            if curl -fsSL --connect-timeout 30 --max-time 600 "$URL" -o bootlin.txz; then
               break
             fi
             echo "Retry $i failed, waiting..."
             sleep 10
           done
-          test -f toolchain.tar.xz || { echo "::error::download failed"; exit 1; }
-          tar -xJf toolchain.tar.xz
+          test -f bootlin.txz || { echo "::error::download failed"; exit 1; }
+          tar -xJf bootlin.txz
+          TOOLCHAIN_DIR=$(find $PWD -maxdepth 1 -type d -name "aarch64--*" | head -1)
+          echo "TOOLCHAIN_DIR=$TOOLCHAIN_DIR" >> $GITHUB_ENV
+          echo "=== Toolchain bin ==="
+          ls -la "$TOOLCHAIN_DIR/bin/" | head -30
 
-      - name: Locate real gcc
+      - name: Verify gcc is x86_64 and works
         run: |
-          echo "=== Top-level bin ==="
-          ls -la "$PWD/musl-gcc-cross/bin/" | head -40
-          echo "=== Find gcc ==="
-          find "$PWD/musl-gcc-cross" -name "*gcc*" -type f 2>/dev/null | head -10
+          GCC="$TOOLCHAIN_DIR/bin/aarch64-buildroot-linux-musl-gcc"
+          if [ ! -x "$GCC" ]; then
+            echo "::error::gcc not found at $GCC"
+            ls "$TOOLCHAIN_DIR/bin/"
+            exit 1
+          fi
+          file "$GCC"
+          "$GCC" --version | head -2
 
       - name: Configure musl
         run: |
-          GCC="$PWD/musl-gcc-cross/bin/aarch64-unknown-linux-musl-gcc"
-          if [ ! -x "$GCC" ]; then
-            echo "::error::gcc not found at $GCC"
-            echo "Trying to find gcc..."
-            find "$PWD/musl-gcc-cross" -name "*gcc*" -type f 2>/dev/null
-            exit 1
-          fi
-          echo "Using GCC: $GCC"
-          "$GCC" --version
+          GCC="$TOOLCHAIN_DIR/bin/aarch64-buildroot-linux-musl-gcc"
           CC="$GCC" ./configure \
             --target=aarch64-linux-musl \
             --prefix=$PWD/dist \
@@ -49,15 +49,15 @@ jobs:
 
       - name: Build musl
         run: |
-          GCC="$PWD/musl-gcc-cross/bin/aarch64-unknown-linux-musl-gcc"
+          GCC="$TOOLCHAIN_DIR/bin/aarch64-buildroot-linux-musl-gcc"
           make -j$(nproc) CC="$GCC"
 
-      - name: Install to dist
+      - name: Install
         run: make install
 
-      - name: Verify and rename
+      - name: Verify and prepare artifact
         run: |
-          test -f dist/lib/libc.so || { echo "::error::libc.so missing"; ls -la dist/lib/ 2>/dev/null; exit 1; }
+          test -f dist/lib/libc.so || { echo "::error::libc.so not found"; ls -la dist/; exit 1; }
           file dist/lib/libc.so
           cp dist/lib/libc.so dist/ld-musl-aarch64.so.1
 
